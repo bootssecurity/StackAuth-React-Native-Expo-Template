@@ -1,0 +1,17 @@
+# Global code owners
+* @bootssecurity
+
+# Authentication and security related files
+/lib/stack-auth.ts @bootssecurity
+/contexts/AuthContext.tsx @bootssecurity
+/components/LoginScreen.tsx @bootssecurity
+/components/ProtectedRoute.tsx @bootssecurity
+
+# Configuration files
+/.env.example @bootssecurity
+/app.json @bootssecurity
+/package.json @bootssecurity
+
+# Documentation
+/README.md @bootssecurity
+/.github/ @bootssecurity
