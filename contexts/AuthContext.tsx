@@ -13,10 +13,13 @@ interface AuthContextType {
   user: User | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  availableOAuthProviders: string[];
   signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string; user_id?: string }>;
   signUp: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
+  signInWithOAuth: (provider: string) => Promise<{ success: boolean; authUrl?: string; error?: string }>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
+  checkOAuthProviders: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -33,23 +36,29 @@ interface AuthProviderProps {
   children: ReactNode;
 }
 
-export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
+export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [availableOAuthProviders, setAvailableOAuthProviders] = useState<string[]>([]);
 
   const refreshUser = async () => {
+    console.log('AuthContext: refreshUser called');
     try {
+      console.log('AuthContext: Calling stackAuthClient.getCurrentUser()');
       const userData = await stackAuthClient.getCurrentUser();
+      console.log('AuthContext: getCurrentUser returned:', userData);
       if (userData) {
+        console.log('AuthContext: Setting user data and authenticated state');
         setUser(userData);
         setIsAuthenticated(true);
       } else {
+        console.log('AuthContext: No user data returned, clearing state');
         setUser(null);
         setIsAuthenticated(false);
       }
     } catch (error) {
-      console.error('Error refreshing user:', error);
+      console.error('AuthContext: Error refreshing user:', error);
       setUser(null);
       setIsAuthenticated(false);
     }
@@ -130,6 +139,26 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     }
   };
 
+  const checkOAuthProviders = async () => {
+    try {
+      const result = await stackAuthClient.getAvailableOAuthProviders();
+      if (result.success && result.providers) {
+        setAvailableOAuthProviders(result.providers);
+      }
+    } catch (error) {
+      console.error('Error checking OAuth providers:', error);
+    }
+  };
+
+  const signInWithOAuth = async (provider: string) => {
+    try {
+      return await stackAuthClient.signInWithOAuth(provider);
+    } catch (error) {
+      console.error('Error with OAuth sign-in:', error);
+      return { success: false, error: 'OAuth sign-in failed' };
+    }
+  };
+
   useEffect(() => {
     console.log('AuthContext: useEffect triggered, checking for stored tokens');
     // Check if user has stored tokens on app load
@@ -157,16 +186,20 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     };
     
     checkStoredAuth();
+    checkOAuthProviders();
   }, []);
 
   const value: AuthContextType = {
     user,
     isLoading,
     isAuthenticated,
+    availableOAuthProviders,
     signIn,
     signUp,
+    signInWithOAuth,
     signOut,
     refreshUser,
+    checkOAuthProviders,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

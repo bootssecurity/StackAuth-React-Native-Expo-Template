@@ -9,10 +9,11 @@ A complete React Native Expo template with StackAuth authentication integration 
 ## 🚀 Features
 
 - **Complete Authentication System**: Login, signup, and user management
+- **OAuth Integration**: Automatic OAuth provider detection and Sign in with Google support
 - **Team Management**: Create teams, invite members, manage team profiles
 - **User Profiles**: Comprehensive user profile management with image upload
 - **Cross-Platform**: Works on both Android and iOS
-- **Modern UI**: Clean and responsive user interface
+- **Modern UI**: Clean and responsive user interface with Google Sign-In button
 - **Environment Configuration**: Secure environment variable management
 
 ## 📱 Screenshots
@@ -29,6 +30,7 @@ A complete React Native Expo template with StackAuth authentication integration 
 - **[React Native](https://reactnative.dev/)** - Cross-platform mobile development
 - **[Expo](https://expo.dev/)** - Development platform and tools
 - **[StackAuth](https://stack-auth.com/)** - Authentication and user management
+- **[Google Sign-In](https://github.com/react-native-google-signin/google-signin)** - Official Google Sign-In integration
 - **[TypeScript](https://www.typescriptlang.org/)** - Type-safe JavaScript
 - **[React Navigation](https://reactnavigation.org/)** - Navigation library
 - **[Expo Router](https://docs.expo.dev/router/introduction/)** - File-based routing
@@ -40,7 +42,29 @@ A complete React Native Expo template with StackAuth authentication integration 
 - Node.js (v16 or higher)
 - npm or yarn
 - Expo CLI
+- EAS CLI (for building the app)
 - StackAuth account
+
+### ⚠️ Important: EAS Build Required
+
+**This app will NOT work with Expo Go** due to native dependencies (Google Sign-In library). You must create an EAS development build to test the app on a physical device or simulator.
+
+**Quick EAS Setup:**
+```bash
+# Install EAS CLI globally
+npm install -g @expo/eas-cli
+
+# Login to your Expo account
+eas login
+
+# Create a development build for iOS simulator
+eas build --profile development --platform ios
+
+# Or create a development build for Android
+eas build --profile development --platform android
+```
+
+For more details, see the [EAS Build documentation](https://docs.expo.dev/build/introduction/).
 
 ### Installation
 
@@ -68,6 +92,10 @@ A complete React Native Expo template with StackAuth authentication integration 
    
    # Team Invitation Configuration
    EXPO_PUBLIC_TEAM_INVITATION_BASE_URL=https://yourinvitatitonbaseurl/handler/team-invitation/
+   
+   # OAuth Configuration
+   #OAuth redirect URI is needed for authentication (StackAuth currently doesnt accept deeplink uri so you need to create a redirect to your deeplink uri you need to redirect it to your deeplink:///oauth-callback/)
+   EXPO_PUBLIC_OAUTH_REDIRECT_URI=https://yourbaseurl/api/oauthforapp 
    ```
    
    **How to get StackAuth credentials:**
@@ -81,9 +109,11 @@ A complete React Native Expo template with StackAuth authentication integration 
    ```
    
    This will start the Expo development server. You can then:
-   - Press `i` to open iOS simulator
-   - Press `a` to open Android emulator
-   - Scan the QR code with Expo Go app on your physical device
+   - Press `i` to open iOS simulator (requires EAS development build)
+   - Press `a` to open Android emulator (requires EAS development build)
+   - Install your EAS development build on a physical device and scan the QR code
+   
+   **Note:** Due to native dependencies, you cannot use Expo Go. You must use an EAS development build.
 
 ## 📁 Project Structure
 
@@ -126,8 +156,11 @@ A complete React Native Expo template with StackAuth authentication integration 
 
 ### Authentication
 - Email/password authentication
+- OAuth integration with automatic provider detection
+- Official Google Sign-In with native button styling
 - Secure token management
 - Protected routes
+- Environment-based OAuth configuration
 
 ### User Management
 - User profile creation and editing

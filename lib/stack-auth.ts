@@ -1,10 +1,11 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Crypto from 'expo-crypto';
 
 // Stack Auth configuration for React Native
 export const STACK_CONFIG = {
   projectId: process.env.EXPO_PUBLIC_STACK_PROJECT_ID ,
   publishableClientKey: process.env.EXPO_PUBLIC_STACK_PUBLISHABLE_CLIENT_KEY ,
-  serverSecretKey: process.env.STACK_SERVER_SECRET_KEY ,
+  serverSecretKey: process.env.EXPO_PUBLIC_STACK_SERVER_SECRET_KEY ,
   baseUrl: process.env.EXPO_PUBLIC_STACK_BASE_URL ,
 };
 
@@ -64,10 +65,11 @@ export class StackAuthClient {
   private serverSecretKey: string;
 
   constructor() {
-    this.baseUrl = STACK_CONFIG.baseUrl;
-    this.projectId = STACK_CONFIG.projectId;
-    this.publishableClientKey = STACK_CONFIG.publishableClientKey;
-    this.serverSecretKey = STACK_CONFIG.serverSecretKey;
+    this.baseUrl = STACK_CONFIG.baseUrl || 'https://api.stack-auth.com';
+    this.projectId = STACK_CONFIG.projectId || '';
+    this.publishableClientKey = STACK_CONFIG.publishableClientKey || '';
+    this.serverSecretKey = STACK_CONFIG.serverSecretKey || '';
+    console.log('StackAuth: Constructor - serverSecretKey loaded:', this.serverSecretKey ? 'YES' : 'NO');
   }
 
   private async makeRequest(endpoint: string, options: RequestInit = {}): Promise<Response> {
@@ -145,7 +147,7 @@ export class StackAuthClient {
       const requestBody = { email, password };
       console.log('StackAuth: Request body:', requestBody);
       
-      const response = await this.makeRequest('/auth/password/sign-in', {
+      const response = await this.makeRequest('auth/password/sign-in', {
         method: 'POST',
         body: JSON.stringify(requestBody),
       });
@@ -178,7 +180,7 @@ export class StackAuthClient {
 
   async signUpWithPassword(email: string, password: string): Promise<{ success: boolean; error?: string }> {
     try {
-      const response = await this.makeRequest('/auth/password/sign-up', {
+      const response = await this.makeRequest('auth/password/sign-up', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
       });
@@ -201,11 +203,174 @@ export class StackAuthClient {
     }
   }
 
+  async getAvailableOAuthProviders(): Promise<{ success: boolean; providers?: string[]; error?: string }> {
+    console.log('StackAuth: getAvailableOAuthProviders called');
+    try {
+      const response = await this.makeRequest('projects/current');
+      console.log('StackAuth: getAvailableOAuthProviders response status:', response.status);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('StackAuth: Project data:', data);
+        
+        // Extract OAuth providers from project configuration
+        const enabledOAuthProviders = data.config?.enabled_oauth_providers || [];
+        const enabledProviders = enabledOAuthProviders.map((provider: any) => provider.id);
+        
+        console.log('StackAuth: Available OAuth providers:', enabledProviders);
+        return { success: true, providers: enabledProviders };
+      } else {
+        const errorData = await response.json();
+        console.log('StackAuth: getAvailableOAuthProviders failed:', errorData);
+        return { success: false, error: errorData.message || 'Failed to fetch OAuth providers' };
+      }
+    } catch (error) {
+      console.error('StackAuth: Error getting OAuth providers:', error);
+      return { success: false, error: 'Network error' };
+    }
+  }
+
+  async signInWithOAuth(provider: string, redirectUri: string = process.env.EXPO_PUBLIC_OAUTH_REDIRECT_URI || 'https://guard.bootserp.com//api/oauthforapp'): Promise<{ success: boolean; authUrl?: string; error?: string }> {
+    console.log('StackAuth: signInWithOAuth called with provider:', provider);
+    try {
+      // Generate PKCE parameters
+      const codeVerifier = this.generateCodeVerifier();
+      const codeChallenge = await this.generateCodeChallenge(codeVerifier);
+      const state = this.generateState();
+      
+      // Store PKCE parameters for later use
+      await AsyncStorage.setItem('@oauth_code_verifier', codeVerifier);
+      await AsyncStorage.setItem('@oauth_state', state);
+      
+      // Build OAuth authorization URL - matching successful web app configuration
+      const params = new URLSearchParams({
+        client_id: this.projectId,
+        client_secret: this.publishableClientKey,
+        redirect_uri: redirectUri,
+        scope: 'legacy',
+        state: state,
+        grant_type: 'authorization_code',
+        code_challenge: codeChallenge,
+        code_challenge_method: 'S256',
+        response_type: 'code',
+        type: 'authenticate',
+        error_redirect_url: redirectUri
+      });
+      
+      const authUrl = `${this.baseUrl}/auth/oauth/authorize/${provider}?${params.toString()}`;
+      console.log('StackAuth: OAuth authorization URL:', authUrl);
+      
+      return { success: true, authUrl };
+    } catch (error) {
+      console.error('StackAuth: Error initiating OAuth:', error);
+      return { success: false, error: 'Failed to initiate OAuth flow' };
+    }
+  }
+
+  async handleOAuthCallback(code: string, state: string): Promise<{ success: boolean; error?: string }> {
+    console.log('StackAuth: handleOAuthCallback called with code:', code, 'state:', state);
+    try {
+      // Verify state parameter
+      const storedState = await AsyncStorage.getItem('@oauth_state');
+      console.log('StackAuth: Stored state:', storedState, 'Received state:', state);
+      if (state !== storedState) {
+        console.error('StackAuth: State mismatch - stored:', storedState, 'received:', state);
+        return { success: false, error: 'Invalid state parameter' };
+      }
+      
+      // Get stored code verifier
+      const codeVerifier = await AsyncStorage.getItem('@oauth_code_verifier');
+      console.log('StackAuth: Code verifier found:', !!codeVerifier);
+      if (!codeVerifier) {
+        console.error('StackAuth: Missing code verifier');
+        return { success: false, error: 'Missing code verifier' };
+      }
+      
+      // Exchange authorization code for tokens
+      const requestBody = {
+        grant_type: 'authorization_code',
+        code: code,
+        code_verifier: codeVerifier,
+        client_id: this.projectId,
+        client_secret: this.publishableClientKey,
+        redirect_uri: process.env.EXPO_PUBLIC_OAUTH_REDIRECT_URI
+      };
+      console.log('StackAuth: Token exchange request body:', requestBody);
+      
+      console.log('StackAuth: Making token exchange request to:', `${this.baseUrl}/auth/oauth/token`);
+      
+      const response = await Promise.race([
+        this.makeRequest('auth/oauth/token', {
+          method: 'POST',
+          body: JSON.stringify(requestBody)
+        }),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Request timeout after 30 seconds')), 30000)
+        )
+      ]) as Response;
+      
+      console.log('StackAuth: Token exchange response status:', response.status);
+      console.log('StackAuth: Token exchange response headers:', Object.fromEntries(response.headers.entries()));
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('StackAuth: Token exchange response data:', data);
+        
+        if (data.access_token) {
+          console.log('StackAuth: Storing access token');
+          await StackTokenStorage.setAccessToken(data.access_token);
+        }
+        if (data.refresh_token) {
+          console.log('StackAuth: Storing refresh token');
+          await StackTokenStorage.setRefreshToken(data.refresh_token);
+        }
+        
+        // Clean up stored OAuth parameters
+        await AsyncStorage.multiRemove(['@oauth_code_verifier', '@oauth_state']);
+        console.log('StackAuth: OAuth callback completed successfully');
+        
+        return { success: true };
+      } else {
+        const errorData = await response.json();
+        console.error('StackAuth: Token exchange failed:', errorData);
+        return { success: false, error: errorData.message || 'OAuth token exchange failed' };
+      }
+    } catch (error) {
+      console.error('StackAuth: Error handling OAuth callback:', error);
+      return { success: false, error: 'OAuth callback handling failed' };
+    }
+  }
+
+  private generateCodeVerifier(): string {
+    const randomBytes = Crypto.getRandomBytes(32);
+    return btoa(String.fromCharCode.apply(null, Array.from(randomBytes)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
+  }
+
+  private async generateCodeChallenge(verifier: string): Promise<string> {
+    const digest = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      verifier,
+      { encoding: Crypto.CryptoEncoding.BASE64 }
+    );
+    return digest.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  }
+
+  private generateState(): string {
+    const randomBytes = Crypto.getRandomBytes(16);
+    return btoa(String.fromCharCode.apply(null, Array.from(randomBytes)))
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
+  }
+
   async getCurrentUser(): Promise<any> {
     console.log('StackAuth: getCurrentUser called');
     try {
       console.log('StackAuth: Making request to /users/me');
-      const response = await this.makeRequest('/users/me');
+      const response = await this.makeRequest('users/me');
       console.log('StackAuth: getCurrentUser response status:', response.status);
       
       if (response.ok) {
@@ -260,10 +425,10 @@ export class StackAuthClient {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'x-stack-publishable-client-key': this.publishableClientKey,
-          'x-stack-project-id': this.projectId,
-          'x-stack-access-type': 'server',
-          'x-stack-secret-server-key': this.serverSecretKey
+          'X-Stack-Publishable-Client-Key': this.publishableClientKey,
+          'X-Stack-Project-Id': this.projectId,
+          'X-Stack-Access-Type': 'server',
+          'X-Stack-Secret-Server-Key': this.serverSecretKey
         }
       });
       console.log('StackAuth: getTeamMemberProfiles response status:', response.status);
@@ -317,7 +482,7 @@ export class StackAuthClient {
 
   async signOut(): Promise<void> {
     try {
-      await this.makeRequest('/auth/sessions/current', {
+      await this.makeRequest('auth/sessions/current', {
         method: 'DELETE',
       });
     } catch (error) {
@@ -341,7 +506,7 @@ export class StackAuthClient {
 
   async getTeams(): Promise<{ success: boolean; teams?: any[]; error?: string }> {
     try {
-      const response = await this.makeRequest('/teams?user_id=me', {
+      const response = await this.makeRequest('teams?user_id=me', {
         method: 'GET',
       });
 
@@ -498,7 +663,7 @@ export class StackAuthClient {
 
   async sendTeamInvitation(teamId: string, email: string, callbackUrl: string): Promise<{ success: boolean; invitationId?: string; error?: string }> {
     try {
-      const response = await this.makeRequest('/team-invitations/send-code', {
+      const response = await this.makeRequest('team-invitations/send-code', {
         method: 'POST',
         body: JSON.stringify({
           team_id: teamId,

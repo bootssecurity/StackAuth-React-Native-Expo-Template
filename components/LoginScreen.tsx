@@ -5,6 +5,7 @@ import {
   Dimensions,
   Image,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   ScrollView,
   StatusBar,
@@ -15,6 +16,7 @@ import {
   View,
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
+import { GoogleSigninButton } from '@react-native-google-signin/google-signin';
 
 type AuthMode = 'signin' | 'signup';
 
@@ -28,7 +30,7 @@ export const LoginScreen: React.FC = () => {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  const { signIn, signUp, isLoading } = useAuth();
+  const { signIn, signUp, signInWithOAuth, availableOAuthProviders, isLoading } = useAuth();
   
   console.log('LoginScreen state:', { mode, email: email ? 'has email' : 'no email', isSubmitting });
 
@@ -120,6 +122,60 @@ export const LoginScreen: React.FC = () => {
     setConfirmPassword('');
   };
 
+  const handleOAuthSignIn = async (provider: string) => {
+    console.log('OAuth sign-in initiated for provider:', provider);
+    setIsSubmitting(true);
+    
+    try {
+      const result = await signInWithOAuth(provider);
+      
+      if (result.success && result.authUrl) {
+        console.log('Opening OAuth URL:', result.authUrl);
+        // Open the OAuth URL in the system browser
+        const supported = await Linking.canOpenURL(result.authUrl);
+        if (supported) {
+          await Linking.openURL(result.authUrl);
+        } else {
+          Alert.alert('Error', 'Cannot open OAuth provider');
+        }
+      } else {
+        Alert.alert('Error', result.error || 'OAuth sign-in failed');
+      }
+    } catch (error) {
+      console.error('OAuth sign-in error:', error);
+      Alert.alert('Error', 'OAuth sign-in failed');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const getProviderDisplayName = (provider: string) => {
+    const providerNames: { [key: string]: string } = {
+      'google': 'Google',
+      'github': 'GitHub',
+      'facebook': 'Facebook',
+      'microsoft': 'Microsoft',
+      'apple': 'Apple',
+      'discord': 'Discord',
+      'twitter': 'Twitter',
+    };
+    return providerNames[provider] || provider.charAt(0).toUpperCase() + provider.slice(1);
+  };
+
+  const getProviderIcon = (provider: string) => {
+    // You can replace these with actual icons or icon libraries
+    const providerIcons: { [key: string]: string } = {
+      'google': '🔍',
+      'github': '🐙',
+      'facebook': '📘',
+      'microsoft': '🪟',
+      'apple': '🍎',
+      'discord': '🎮',
+      'twitter': '🐦',
+    };
+    return providerIcons[provider] || '🔐';
+  };
+
   const isFormValid = () => {
     const basicValid = email.trim() && password.trim() && validateEmail(email) && validatePassword(password);
     if (mode === 'signup') {
@@ -173,6 +229,46 @@ export const LoginScreen: React.FC = () => {
                 : 'Join us today'
               }
             </Text>
+
+            {/* OAuth Providers */}
+            {availableOAuthProviders && availableOAuthProviders.length > 0 && (
+              <View style={styles.oauthContainer}>
+                {availableOAuthProviders.map((provider) => {
+                  if (provider === 'google') {
+                    return (
+                      <View key={provider} style={styles.googleButtonContainer}>
+                        <GoogleSigninButton
+                          size={GoogleSigninButton.Size.Wide}
+                          color={GoogleSigninButton.Color.Light}
+                          onPress={() => handleOAuthSignIn(provider)}
+                          disabled={isSubmitting || isLoading}
+                          style={styles.googleButton}
+                        />
+                      </View>
+                    );
+                  }
+                  return (
+                    <TouchableOpacity
+                      key={provider}
+                      style={styles.oauthButton}
+                      onPress={() => handleOAuthSignIn(provider)}
+                      disabled={isSubmitting || isLoading}
+                    >
+                      <Text style={styles.oauthIcon}>{getProviderIcon(provider)}</Text>
+                      <Text style={styles.oauthButtonText}>
+                        Continue with {getProviderDisplayName(provider)}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+                
+                <View style={styles.dividerContainer}>
+                  <View style={styles.dividerLine} />
+                  <Text style={styles.dividerText}>or</Text>
+                  <View style={styles.dividerLine} />
+                </View>
+              </View>
+            )}
 
             <View style={styles.inputContainer}>
                <TextInput
@@ -379,5 +475,52 @@ const styles = StyleSheet.create({
     color: '#85432d',
     fontWeight: '600',
     textAlign: 'center',
+  },
+  oauthContainer: {
+    marginBottom: 30,
+  },
+  oauthButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+    borderWidth: 1,
+    borderColor: '#e9ecef',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    justifyContent: 'center',
+  },
+  oauthIcon: {
+    fontSize: 20,
+    marginRight: 12,
+  },
+  oauthButtonText: {
+    fontSize: 16,
+    color: '#333333',
+    fontWeight: '600',
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#e9ecef',
+  },
+  dividerText: {
+    marginHorizontal: 16,
+    fontSize: 14,
+    color: '#666666',
+    fontWeight: '500',
+  },
+  googleButtonContainer: {
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  googleButton: {
+    width: width * 0.85,
   },
 });
